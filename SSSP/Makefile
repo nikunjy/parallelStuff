@@ -12,7 +12,7 @@ CC = g++ -std=c++0x
 .cpp.o: 
 	$(CC) -c -g -o $*.o $<
 
-ALL.O = Dijkstra.o
+ALL.O = SSSP.o
 
 sssp: $(ALL.O)
 	$(CC) -g -o $@ $(ALL.O) $(LIBS)
