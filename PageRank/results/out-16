@@ -1,0 +1,11 @@
+TACC: Starting up job 1837407
+TACC: Setting up parallel environment for MVAPICH2+mpispawn.
+TACC: Starting parallel tasks...
+/work/02188/nikunj/graphs/USA-road.edgelist16
+Graph Read 
+Iterations 39
+3.23616
+Iterations 18
+1.22293
+Distance 0.241188 
+TACC: Shutdown complete. Exiting.
