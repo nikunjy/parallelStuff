@@ -2,12 +2,11 @@
 #define GRAPHREADER_H
 #include "Graph.h"
 #include <fstream>
-using namespace std;
-Graph& read_graph(string file) {
-  read_graph(file.c_str());
+Graph& read_graph(std::string file) {
+  return read_graph(file.c_str());
 }
 Graph& read_graph(char *file) { 
-	fstream fin(file,ios::in); 
+  std::fstream fin(file,std::ios::in); 
 	int64_t V,E;
 	fin>>V>>E; 
 	Graph *graph = new Graph(V);

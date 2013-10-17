@@ -4,8 +4,7 @@
 
 
 LIBS = 
-
-CC = g++ -std=c++0x
+CC = g++ -O3 -fopenmp -lpthread
 
 .SUFFIXES: .o .cpp .cxx
 
@@ -21,4 +20,4 @@ clean:
 	rm -f $(ALL.O)
 
 clean_all:
-	rm -f $(ALL.O) SSSP_Week1 
+	rm -f $(ALL.O) sssp 

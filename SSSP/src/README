@@ -1,0 +1,3 @@
+Here is a sample run
+ibrun tacc_affinity /work/02188/nikunj/multicore/parallelStuff/SSSP/src/sssp -v -t 4 -f /work/02188/nikunj/graphs/USA-road-d.USA.w_edgelist -o /work/02188/nikunj/multicore/parallelStuff/SSSP/ssp-out-chaotic-4 -algorithm Chaotic
+

@@ -1,0 +1,1 @@
+./run.sh ssp-serial /work/02188/nikunj/multicore/parallelStuff/SSSP/ssp-serial /work/02188/nikunj/multicore/parallelStuff/SSSP/src/sssp /work/02188/nikunj/graphs/USA-road-d.USA.w_edgelist /work/02188/nikunj/multicore/parallelStuff/SSSP/ssp-out BellmanFord
