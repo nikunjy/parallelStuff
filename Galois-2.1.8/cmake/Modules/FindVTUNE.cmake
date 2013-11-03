@@ -1,0 +1,11 @@
+set(VTUNE_DIR "/opt/intel/vtune_amplifier_xe_2013")
+set(VTUNE_INCLUDE_DIRS "${VTUNE_DIR}/include")
+if(EXISTS ${VTUNE_INCLUDE_DIRS})
+  set(VTUNE_FOUND_INTERNAL "YES")
+  set(VTUNE_LIBRARIES "${VTUNE_DIR}/lib64/libittnotify.a" dl)
+else()
+  set(VTUNE_FOUND off)
+  set(VTUNE_INCLUDE_DIRS off)
+endif()
+
+find_package_handle_standard_args(VTUNE DEFAULT_MSG VTUNE_FOUND_INTERNAL)
