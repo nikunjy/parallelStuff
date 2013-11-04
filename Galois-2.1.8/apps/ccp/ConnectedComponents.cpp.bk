@@ -1,0 +1,221 @@
+/** Connected Components application -*- C++ -*-
+ * @file
+ *
+ * A simple spanning tree algorithm to demostrate the Galois system.
+ *
+ * @section License
+ *
+ * Galois, a framework to exploit amorphous data-parallelism in irregular
+ * programs.
+ *
+ * Copyright (C) 2012, The University of Texas at Austin. All rights reserved.
+ * UNIVERSITY EXPRESSLY DISCLAIMS ANY AND ALL WARRANTIES CONCERNING THIS
+ * SOFTWARE AND DOCUMENTATION, INCLUDING ANY WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR ANY PARTICULAR PURPOSE, NON-INFRINGEMENT AND WARRANTIES OF
+ * PERFORMANCE, AND ANY WARRANTY THAT MIGHT OTHERWISE ARISE FROM COURSE OF
+ * DEALING OR USAGE OF TRADE.  NO WARRANTY IS EITHER EXPRESS OR IMPLIED WITH
+ * RESPECT TO THE USE OF THE SOFTWARE OR DOCUMENTATION. Under no circumstances
+ * shall University be liable for incidental, special, indirect, direct or
+ * consequential damages or loss of profits, interruption of business, or
+ * related expenses which may arise from use of Software or Documentation,
+ * including but not limited to those resulting from defects in Software and/or
+ * Documentation, or loss or inaccuracy of data of any kind.
+ *
+ * @author Nikunj Yadav nikunj@cs.utexas.edu
+ */
+#include "Galois/Galois.h"
+#include "Galois/Bag.h"
+#include "Galois/Statistic.h"
+#include "Galois/Graphs/LCGraph.h"
+#include "Galois/ParallelSTL/ParallelSTL.h"
+#ifdef GALOIS_USE_EXP
+#include "Galois/Runtime/ParallelWorkInline.h"
+#endif
+#include "llvm/Support/CommandLine.h"
+#include <set>
+#include "Lonestar/BoilerPlate.h"
+
+#include "boost/optional.hpp"
+
+#include <utility>
+#include <vector>
+#include <algorithm>
+#include <iostream>
+#include <list>
+using namespace std;
+const char* name = "Connected Components";
+const char* desc = "Calculated the connected component id for each vertex";
+const char* url = "ccp";
+
+enum Algo {
+  serial,
+  parallel,
+};
+enum Schedule {
+  FIFO,
+  LIFO,
+  CHUNKED,
+  DCHUNKED,
+  ORDERED,
+  LOCALQ,
+};
+
+namespace cll = llvm::cl;
+static cll::opt<std::string> filename(cll::Positional, cll::desc("<input file>"), cll::Required);
+static cll::opt<Algo> algo(cll::desc("Choose an algorithm:"),
+    cll::values(
+      clEnumVal(serial, "Serial"),
+      clEnumVal(parallel, "Parallel"),
+      clEnumValEnd), cll::init(parallel));
+static cll::opt<Schedule> schedule(cll::desc("Choose a schedule:"),
+    cll::values(
+      clEnumVal(FIFO, "FIFO"),
+      clEnumVal(LIFO, "LIFO"),
+      clEnumVal(CHUNKED, "chunked"),
+      clEnumVal(DCHUNKED, "dChunked"),
+      clEnumVal(ORDERED, "ordered"),
+      clEnumVal(LOCALQ, "localQ"),
+      clEnumValEnd), cll::init(FIFO));
+struct Node {
+  unsigned int id;
+  unsigned int cid;
+  Node() {}
+};
+
+typedef Galois::Graph::LC_CSR_Graph<Node,void> Graph;
+typedef Graph::GraphNode GNode;
+Graph graph;
+
+struct Process {
+  void operator()(GNode node, Galois::UserContext<GNode> &lwl) { 
+    auto flag = Galois::MethodFlag::NONE;
+    auto &nData = graph.getData(node,Galois::ALL);
+    for (auto ei = graph.edge_begin(node,flag),ee=graph.edge_end(node,flag);
+      ei != ee; ei++) {
+      GNode neigh = graph.getEdgeDst(ei);
+      auto &neighData = graph.getData(neigh,Galois::WRITE);
+      if (neighData.cid > nData.cid) {
+        neighData.cid = nData.cid;
+        lwl.push(neigh);
+      }
+    }
+  }
+};
+struct serialProcess {
+  void operator()(GNode node, list<GNode>& workList) {
+    auto &nData = graph.getData(node);
+    for (auto ei = graph.edge_begin(node),ee=graph.edge_end(node);
+      ei != ee; ei++) {
+      GNode neigh = graph.getEdgeDst(ei);
+      auto &neighData = graph.getData(neigh);
+      if (neighData.cid > nData.cid) { 
+        neighData.cid = nData.cid;
+        if (schedule == FIFO) {
+            workList.push_back(neigh);
+        } else if (schedule == ORDERED) {
+            list<GNode>::iterator it = workList.begin(); 
+            for (auto et = workList.end(); it != et; it++) {
+              if (graph.getData(*it).cid > neighData.cid) { 
+                break;
+              }
+            }
+            workList.insert(it,neigh);
+        } else {         
+            workList.push_front(neigh);
+        }
+      }
+    }
+  }
+};
+struct Indexer: public std::unary_function<GNode, unsigned int> {
+    unsigned int operator()(const GNode& val) const {
+      auto &data = graph.getData(val,Galois::NONE);
+      unsigned int ret = data.cid;
+      if (ret > 10000) {
+        ret = 10000;
+      }
+      return ret;
+    }
+};
+struct Dummy { 
+  void operator()(GNode node, Galois::UserContext<GNode> &lwl) {
+  } 
+};
+struct GaloisAlgo {
+  void operator()() {
+    switch(schedule) {
+      case FIFO :
+        std::cout<<"Using FIFO Queue"<<std::endl;
+        Galois::for_each<GaloisRuntime::WorkList::FIFO<GNode,true> >(graph.begin(), graph.end(), Process(),"Connected Components");
+      break;
+      case CHUNKED :
+        std::cout<<"Using Chunked FIFO Queue"<<std::endl;
+        //Galois::for_each<GaloisRuntime::WorkList::ChunkedFIFO<1024> >(graph.begin(), graph.end(), Process(),"Connected Components");
+        Galois::for_each_local<GaloisRuntime::WorkList::ChunkedFIFO<1024> >(graph, Process(),"Connected Components");
+      break;
+      case DCHUNKED :
+        std::cout<<"Using dChunked FIFO Queue"<<std::endl;
+        Galois::for_each<GaloisRuntime::WorkList::dChunkedFIFO<1024> >(graph.begin(), graph.end(), Process(),"Connected Components");
+      break;
+      case ORDERED :
+        std::cout<<"Using OBIM Queue"<<std::endl;
+        typedef GaloisRuntime::WorkList::dChunkedFIFO<> Chunk;
+        Galois::for_each<GaloisRuntime::WorkList::OrderedByIntegerMetric<Indexer,Chunk> >(graph.begin(), graph.end(), Process(), "Connected Components");
+        //Galois::for_each_local<GaloisRuntime::WorkList::OrderedByIntegerMetric<Indexer,Chunk> >(graph,Process(), "Connected Components");
+       
+        //Galois::for_each_ordered(graph.begin(), graph.end(), Compare(), Process());
+      break;
+      case LOCALQ:
+        //typedef GaloisRuntime::WorkList::dChunkedFIFO<> Chunk;
+        std::cout<<"Using Local Queues"<<std::endl;
+        Galois::for_each<GaloisRuntime::WorkList::LocalQueues<Chunk>>(graph.begin(), graph.end(), Process(),"Connected Components");
+      break;
+      case LIFO:
+        std::cout<<"Using LIFO Queue"<<std::endl;
+        Galois::for_each<GaloisRuntime::WorkList::dChunkedLIFO<128> >(graph.begin(), graph.end(), Process(),"Connected Components");
+      break;
+    }
+  }
+};
+
+struct SerialAlgo {
+  void operator()() {
+    list<GNode> workList; 
+    for (auto nb = graph.begin(),ne = graph.end();
+      nb != ne; nb++) {
+      workList.push_back(*nb);
+    }
+    while (!workList.empty()) {
+      GNode node = workList.front(); 
+      workList.pop_front();
+      serialProcess()(node,workList);
+    }
+  }
+};
+
+int main(int argc, char** argv) {
+  Galois::StatManager statManager;
+  LonestarStart(argc, argv, name, desc, url);
+  graph.structureFromFile(filename);
+  unsigned int id = 0;
+  for (Graph::iterator ii = graph.begin(), ei = graph.end(); ii != ei; ++ii, ++id) {
+    graph.getData(*ii).id = graph.getData(*ii).cid = id;
+  }
+  std::cout<<id<<std::endl;
+  Galois::preAlloc(numThreads + (graph.size() * sizeof(Node) * numThreads / 8) / GaloisRuntime::MM::pageSize);
+  std::cout<<"Graph Read"<<std::endl;
+  Galois::StatTimer T;
+  T.start();
+  switch (algo) {
+    case serial: SerialAlgo()(); break;
+    default: GaloisAlgo()(); break;
+  }
+  T.stop();
+  std::cout<<"Time Taken "<<T.get()<<" ms "<<std::endl;
+  set<unsigned int> cc;
+  for (Graph::iterator ii = graph.begin(), ei = graph.end(); ii != ei; ++ii, ++id) {
+    cc.insert(graph.getData(*ii).cid);
+  }
+  cout<<"Number of Components "<<cc.size()<<endl;
+  return 0;
+}
