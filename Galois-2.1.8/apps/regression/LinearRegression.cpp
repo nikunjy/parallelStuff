@@ -83,7 +83,7 @@ void readGraph(string fileName,int &featureSize,int &numSamples) {
 			GNode gNode = graph.createNode(node);
       graph.addNode(gNode,Galois::NONE);
       auto &nd = graph.getData(gNode,Galois::NONE);
-      vector<float> &fv(nd.featureValues);
+      vector<float,AlignmentAllocator<float,16> > &fv(nd.featureValues);
       for (int j = 0; j < fv.size(); j++) { 
         fv[j] = (fv[j]-means[j])/(var[j].first - var[j].second);
       }
@@ -108,9 +108,25 @@ struct Process {
 		vector <float> &localGain(*localGains.getLocal());
 		float error = 0;
 		float expectedValue = 0.0;
-		for (int i = 0; i < featureSize; i++) {
+    int index = 0;
+    __m128 a1,x1,r1,a2,x2,r2;
+    __m128 sum = _mm_setzero_ps();
+    __m128 sum1 = _mm_setzero_ps();
+    __m128 sum2 = _mm_setzero_ps();
+    for(size_t j=0;j<featureSize;j+=4,index+=4) {
+        float *theta = &(globalThetas[index]);
+        float *f = &(nd.featureValues[index]);
+        a1 = _mm_load_ps(theta);
+        x1 = _mm_load_ps(f);
+        r1 = _mm_mul_ps(a1,x1);
+        sum1 = _mm_add_ps(r1,sum1);
+    }
+     _mm_hadd_ps(sum1,sum1);
+     _mm_hadd_ps(sum1,sum1);
+     _mm_store_ss(&expectedValue,sum);
+		/*for (int i = 0; i < featureSize; i++) {
 			expectedValue += globalThetas[i] * nd.featureValues[i];
-		}
+		}*/
 		error = (expectedValue - nd.outValue);
 		float &gain(*gainValue.getLocal());
 		gain = error;

@@ -17,8 +17,13 @@
 #include <vector>
 #include <algorithm>
 #include <iostream>
+#include<smmintrin.h>
+#include<emmintrin.h>
+#include<pmmintrin.h>
+#include<immintrin.h>
+#include "allocator.h"
 struct Node { 
-  std::vector <float> featureValues;
+  std::vector <float,AlignmentAllocator<float,16> > featureValues;
 	float outValue; 
 };
 typedef Galois::Graph::FirstGraph<Node,void,false> Graph;  //we should use LC graphs
