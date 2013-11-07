@@ -31,6 +31,8 @@ const char* desc = "Compute the gradient descent for linear regression with line
 const char* url = "regression";
 namespace cll = llvm::cl;
 static cll::opt<std::string> filename(cll::Positional, cll::desc("<input file>"), cll::Required);
+static cll::opt<int> fs(cll::Positional, cll::desc("featureSize"));
+static cll::opt<int> ns(cll::Positional, cll::desc("Samples"));
 
 vector<float> globalThetas;
 Graph graph;
@@ -39,7 +41,10 @@ void readGraph(string fileName,int &featureSize,int &numSamples) {
 	vector<Node> equations;
 	int dim,V; 
 	fin>>dim>>V;
+  dim = fs;
+  V = ns;
   cout<<dim<<" "<<V;
+  cout.flush();
 	featureSize = dim;
   numSamples = V;
   vector<float> means(dim+1,0);
@@ -83,10 +88,10 @@ void readGraph(string fileName,int &featureSize,int &numSamples) {
         fv[j] = (fv[j]-means[j])/(var[j].first - var[j].second);
       }
       int dim = fv.size() + 1;
-      nd.outValue = (nd.outValue - means[dim])/(var[dim].first - var[dim].second);
+      nd.outValue = (nd.outValue - means[dim])/(var[dim].first - var[dim].second + 1);
 		}
 	};
-	Galois::do_all(equations.begin(), equations.end(),fillGraph(means,variance));
+	Galois::do_all(equations.begin(), equations.end(),fillGraph(means,variance),"make_graph");
 }
 typedef GaloisRuntime::PerThreadStorage<vector<float> > threadF; 
 typedef GaloisRuntime::PerThreadStorage<float> threadG;
@@ -118,9 +123,10 @@ int main(int argc,char **argv) {
 	Galois::StatManager statManager;
 	LonestarStart(argc, argv, name, desc, url);
   int featureSize,numSamples;
+  Galois::preAlloc(10000);
 	readGraph(filename,featureSize,numSamples);
+  globalThetas.resize(featureSize);
   cout<<"Graph read "<<featureSize<<" "<<numSamples<<endl;
-	//TODO feature scaling and mean normalization for x values and y values 
 	std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<float> dis(-1, 1);
@@ -130,7 +136,7 @@ int main(int argc,char **argv) {
 	}
 	float alpha = 2; //something 
   int iter = 0; 
-  int total_iter = 4;
+  int total_iter = 200;
   Galois::StatTimer T;
   T.start();
 	do {
@@ -156,7 +162,7 @@ int main(int argc,char **argv) {
 		//TODO specify termination condition here 
 		//Change learning rate here if the convergence is too slow 
 		//Change Learning rate here if the gain not monotonically decreasing
-    iter++;
+    iter++;  
 	}while(iter < total_iter);
   T.stop(); 
   cout<<"Time spent "<<T.get()<<" ms "<<endl;
