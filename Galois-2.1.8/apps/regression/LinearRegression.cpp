@@ -39,6 +39,7 @@ void readGraph(string fileName,int &featureSize,int &numSamples) {
 	vector<Node> equations;
 	int dim,V; 
 	fin>>dim>>V;
+  cout<<dim<<" "<<V;
 	featureSize = dim;
   numSamples = V;
   vector<float> means(dim+1,0);
@@ -49,7 +50,7 @@ void readGraph(string fileName,int &featureSize,int &numSamples) {
 			float value; 
 			fin>>value;
       means[k] += value;
-      if (i ==0) { 
+      if (i == 0) { 
         variance[k].first = value;
         variance[k].second = value;
       } else { 
@@ -61,8 +62,8 @@ void readGraph(string fileName,int &featureSize,int &numSamples) {
       } else {
 		    node.outValue = value;
       }
-		  equations.push_back(node);
 	  }
+    equations.push_back(node);
   }
   for ( int k = 0; k <= dim ; k++) { 
     means[k]/=(double)V;
@@ -118,6 +119,7 @@ int main(int argc,char **argv) {
 	LonestarStart(argc, argv, name, desc, url);
   int featureSize,numSamples;
 	readGraph(filename,featureSize,numSamples);
+  cout<<"Graph read "<<featureSize<<" "<<numSamples<<endl;
 	//TODO feature scaling and mean normalization for x values and y values 
 	std::random_device rd;
   std::mt19937 gen(rd());
@@ -126,7 +128,11 @@ int main(int argc,char **argv) {
 	for ( int i = 0; i < featureSize; i++) { 
 		globalThetas[i] = dis(gen);
 	}
-	float alpha = 0.1; //something 
+	float alpha = 2; //something 
+  int iter = 0; 
+  int total_iter = 4;
+  Galois::StatTimer T;
+  T.start();
 	do {
 		threadF localGains; 
 		threadG gainValues;
@@ -150,5 +156,9 @@ int main(int argc,char **argv) {
 		//TODO specify termination condition here 
 		//Change learning rate here if the convergence is too slow 
 		//Change Learning rate here if the gain not monotonically decreasing
-	}while(true);
+    iter++;
+	}while(iter < total_iter);
+  T.stop(); 
+  cout<<"Time spent "<<T.get()<<" ms "<<endl;
+  return 0;
 }
