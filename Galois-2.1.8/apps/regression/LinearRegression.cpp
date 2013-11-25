@@ -104,6 +104,9 @@ void readGraph(string fileName,int &featureSize,int &numSamples) {
 	Galois::do_all(equations.begin(), equations.end(),fillGraph(means,variance),"make_graph");
 }
 #define USE_SSE
+typedef vector<float, AlignmentAllocator<float,16> > AlignedVector;
+typedef GaloisRuntime::PerThreadStorage<vector<float,AlignmentAllocator<float,16> > > threadF; 
+typedef GaloisRuntime::PerThreadStorage<float> threadG;	
 struct GD { 
 	threadF &localGains; 
 	threadG &gainValue;
@@ -163,9 +166,11 @@ struct GD {
 struct SGD {
   threadF &perThreadWeights; 
   float alpha = 0.5;
-  SGD(threadF &ptw),perThreadWeights(ptw) { 
+  int featureSize; 
+  SGD(threadF &ptw):perThreadWeights(ptw) { 
+    featureSize = fs;
   }
-  void operator()() { 
+  void operator()(int num) { 
     AlignedVector &localWeights(*perThreadWeights.getLocal());
     for (auto nb = graph.local_begin(),ne = graph.local_end(); nb!=ne; 
       nb++) { 
@@ -182,7 +187,8 @@ struct SGD {
   }
 };
 void do_gd () { 
-  globalThetas.resize(featureSize);
+  globalThetas.resize(fs);
+  int featureSize = fs;
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<float> dis(-1, 1);
@@ -199,7 +205,7 @@ void do_gd () {
     threadF localGains; 
     threadG gainValues;
     for (int i = 0; i < localGains.size(); i++) { 
-      localGains.getRemote(i)->resize(featureSize);
+      localGains.getRemote(i)->resize(fs);
       float &gain(*gainValues.getRemote(i));
       gain = 0;
     }
@@ -225,13 +231,14 @@ void do_gd () {
   cout<<"Time spent "<<T.get()<<" ms "<<endl;
 }
 void do_sgd () {
-  globalThetas.resize(featureSize); 
+  globalThetas.resize(fs); 
+  int featureSize = fs;
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<float> dis(-1, 1);
   threadF perThreadWeights; 
   for ( int j = 0; j < globalThetas.size(); j++) { 
-    globalThetas[i] = dis(gen);
+    globalThetas[j] = dis(gen);
   }
   for ( int i = 0 ; i < perThreadWeights.size(); i++) {
     AlignedVector &threadWeights(*perThreadWeights.getRemote(i));
@@ -240,8 +247,9 @@ void do_sgd () {
       threadWeights[j] = globalThetas[j];
     }
   }
-  for (int iter_num = 0; iter_num < 500; i++) { 
-    Galois::do_all_local(graph,SGD(perThreadWeights));
+  for (int iter_num = 0; iter_num < 500; iter_num++) { 
+    vector<int> dummy(perThreadWeights.size());
+    Galois::do_all(dummy.begin(),dummy.end(),SGD(perThreadWeights));
     for (int i = 0; i< globalThetas.size(); i++)  {
       globalThetas[i] = 0.0; 
     }
