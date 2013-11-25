@@ -65,7 +65,7 @@ void readGraph(string fileName,int &featureSize,int &numSamples) {
 			float value; 
       value = atof(tokens[k].c_str());
       means[k] += value;
-      if (i == 0) { 
+      if (i == 1) { 
         variance[k].first = value;
         variance[k].second = value;
       } else { 
@@ -165,23 +165,31 @@ struct GD {
 };
 struct SGD {
   threadF &perThreadWeights; 
-  float alpha = 0.5;
+  float alpha;
+  int batchSize = 500;
   int featureSize; 
-  SGD(threadF &ptw):perThreadWeights(ptw) { 
+  SGD(threadF &ptw,float alpha):perThreadWeights(ptw) { 
     featureSize = fs;
+    this->alpha = alpha;
   }
-  void operator()(int num) { 
+  void operator()(int num, Galois::UserContext<int>& ctx) {
+ typedef std::vector<GNode, typename Galois::PerIterAllocTy::rebind<GNode>::other> TN;
+    TN nodes(ctx.getPerIterAlloc());
     AlignedVector &localWeights(*perThreadWeights.getLocal());
-    for (auto nb = graph.local_begin(),ne = graph.local_end(); nb!=ne; 
-      nb++) { 
-      auto &nd = graph.getData(*nb); 
+    for (auto nb = graph.local_begin(), ne = graph.local_end(); nb != ne; nb++) {
+      nodes.push_back(*nb);
+    }
+    srand(time(NULL));
+    for(int count = 0; count < batchSize; count++) {
+      int index = rand()%nodes.size();
+      auto &nd = graph.getData(nodes[index],Galois::MethodFlag::NONE); 
       float expectedValue = 0.0;
       for (int i = 0; i < featureSize; i++) { 
         expectedValue += localWeights[i] * nd.featureValues[i];
       }
-      float error = nd.outValue - expectedValue; 
+      float error = fabs(nd.outValue - expectedValue); 
       for (int i = 0; i < featureSize; i++) { 
-        localWeights[i] -= (alpha * error);
+        localWeights[i] -= (alpha * error) * nd.featureValues[i];
       }
     }
   }
@@ -196,11 +204,13 @@ void do_gd () {
   for ( int i = 0; i < featureSize; i++) { 
     globalThetas[i] = dis(gen);
   }
-  float alpha = 2; //something 
+  float alpha = 0.05; //something 
   int iter = 0; 
   int total_iter = 200;
   Galois::StatTimer T;
   T.start();
+  float prevError = 0.0;
+  float deltaError = 0.0;
   do {
     threadF localGains; 
     threadG gainValues;
@@ -217,6 +227,21 @@ void do_gd () {
         globalGain[j] += localGain[i];
       }
     }
+    float totalError = 0.0; 
+    for (int i = 0; i < gainValues.size(); i++) { 
+      totalError += *gainValues.getRemote(i);
+    }
+    if (iter>0) { 
+      if (totalError > prevError) { 
+        alpha /= 2;
+        cout<<"New Alpha :"<<alpha<<endl; 
+      } else if (iter%50 == 0) { 
+        alpha *= 2; 
+      }
+      deltaError = totalError - prevError;
+      cout<<"Delta Error :" <<deltaError<<endl;
+    }
+    cout<<totalError<<endl;
     for (int i = 0; i < featureSize; i ++) { 
       globalThetas[i] -= alpha * globalGain[i];
       globalGain[i] = 0;
@@ -225,11 +250,33 @@ void do_gd () {
     //TODO specify termination condition here 
     //Change learning rate here if the convergence is too slow 
     //Change Learning rate here if the gain not monotonically decreasing
+    prevError = totalError;
     iter++;  
+    if ( iter > 1 && fabs(deltaError) - 0.001 <= 0) { 
+      cout<<"Converged in number of Iterations : "<<iter;
+      break;
+    }
   }while(iter < total_iter);
   T.stop(); 
   cout<<"Time spent "<<T.get()<<" ms "<<endl;
 }
+struct calcError { 
+  threadG &errors;
+  calcError(threadG &e):errors(e) {
+  }
+  void operator()(int t) { 
+    for (auto nb = graph.local_begin(),ne = graph.local_end(); nb!=ne; 
+      nb++) { 
+      auto &nd = graph.getData(*nb); 
+      float expectedValue = 0.0;
+      for (int i = 0; i < fs; i++) { 
+        expectedValue += globalThetas[i] * nd.featureValues[i];
+      }
+      float &error(*errors.getLocal()); 
+      error  += fabs(nd.outValue - expectedValue); 
+    }
+  }
+};
 void do_sgd () {
   globalThetas.resize(fs); 
   int featureSize = fs;
@@ -247,18 +294,41 @@ void do_sgd () {
       threadWeights[j] = globalThetas[j];
     }
   }
-  for (int iter_num = 0; iter_num < 500; iter_num++) { 
+  float alpha = 0.05;
+  float prevError = 0.0;
+  for (int iter_num = 0; iter_num < 100; iter_num++) { 
     vector<int> dummy(perThreadWeights.size());
-    Galois::do_all(dummy.begin(),dummy.end(),SGD(perThreadWeights));
+    Galois::for_each(dummy.begin(),dummy.end(),SGD(perThreadWeights, alpha));
     for (int i = 0; i< globalThetas.size(); i++)  {
       globalThetas[i] = 0.0; 
     }
     for (int i = 0 ; i < perThreadWeights.size(); i++) { 
       AlignedVector &threadWeights(*perThreadWeights.getRemote(i));
       for ( int j = 0; j < threadWeights.size(); j++) { 
-        globalThetas[j] += (threadWeights[j] / perThreadWeights.size());
+        globalThetas[j] += threadWeights[j];
       }
     }
+    for (int i = 0; i < perThreadWeights.size(); i++) { 
+      globalThetas[i] /= perThreadWeights.size();
+    }
+    threadG perThreadError; 
+    for (int i = 0; i < perThreadError.size(); i++) { 
+      float &error(*perThreadError.getRemote(i)); 
+      error = 0;
+    }
+    Galois::do_all(dummy.begin(),dummy.end(),calcError(perThreadError));
+    float totalError = 0; 
+    for (int i = 0; i < perThreadError.size(); i++) { 
+      totalError += *perThreadError.getRemote(i);
+    }
+    if (iter_num > 0) {
+      if (totalError > prevError) {
+        alpha /= 2;
+        cout<<"New Alpha "<<alpha<<endl;
+      }
+    }
+    prevError = totalError;
+    cout<<"Error "<<totalError<<endl;
   }
 }
 
@@ -266,10 +336,9 @@ int main(int argc,char **argv) {
 	Galois::StatManager statManager;
 	LonestarStart(argc, argv, name, desc, url);
   int featureSize,numSamples;
-  Galois::preAlloc(10000);
+  //Galois::preAlloc(10000);
 	readGraph(filename,featureSize,numSamples);
   cout<<"Graph read "<<featureSize<<" "<<numSamples<<endl;
-  
-  
+  do_sgd(); 
   return 0;
 }
