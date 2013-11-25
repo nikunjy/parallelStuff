@@ -104,8 +104,6 @@ void readGraph(string fileName,int &featureSize,int &numSamples) {
 	Galois::do_all(equations.begin(), equations.end(),fillGraph(means,variance),"make_graph");
 }
 #define USE_SSE
-typedef GaloisRuntime::PerThreadStorage<vector<float,AlignmentAllocator<float,16> > > threadF; 
-typedef GaloisRuntime::PerThreadStorage<float> threadG;
 struct GD { 
 	threadF &localGains; 
 	threadG &gainValue;
@@ -162,57 +160,108 @@ struct GD {
 #endif
 	}
 };
-struct sgd {
-
+struct SGD {
+  threadF &perThreadWeights; 
+  float alpha = 0.5;
+  SGD(threadF &ptw),perThreadWeights(ptw) { 
+  }
+  void operator()() { 
+    AlignedVector &localWeights(*perThreadWeights.getLocal());
+    for (auto nb = graph.local_begin(),ne = graph.local_end(); nb!=ne; 
+      nb++) { 
+      auto &nd = graph.getData(*nb); 
+      float expectedValue = 0.0;
+      for (int i = 0; i < featureSize; i++) { 
+        expectedValue += localWeights[i] * nd.featureValues[i];
+      }
+      float error = nd.outValue - expectedValue; 
+      for (int i = 0; i < featureSize; i++) { 
+        localWeights[i] -= (alpha * error);
+      }
+    }
+  }
 };
+void do_gd () { 
+  globalThetas.resize(featureSize);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<float> dis(-1, 1);
+  //Initialize globalThetas
+  for ( int i = 0; i < featureSize; i++) { 
+    globalThetas[i] = dis(gen);
+  }
+  float alpha = 2; //something 
+  int iter = 0; 
+  int total_iter = 200;
+  Galois::StatTimer T;
+  T.start();
+  do {
+    threadF localGains; 
+    threadG gainValues;
+    for (int i = 0; i < localGains.size(); i++) { 
+      localGains.getRemote(i)->resize(featureSize);
+      float &gain(*gainValues.getRemote(i));
+      gain = 0;
+    }
+    Galois::do_all_local(graph,GD(localGains,gainValues,featureSize));
+    vector <float> globalGain(featureSize);
+    for (int i = 0; i < localGains.size(); i++) { 
+      vector<float,AlignmentAllocator<float,16> > &localGain(*localGains.getRemote(i));
+      for (int j = 0; j < localGain.size(); j++) {
+        globalGain[j] += localGain[i];
+      }
+    }
+    for (int i = 0; i < featureSize; i ++) { 
+      globalThetas[i] -= alpha * globalGain[i];
+      globalGain[i] = 0;
+    }
+    //Using gainValues do:
+    //TODO specify termination condition here 
+    //Change learning rate here if the convergence is too slow 
+    //Change Learning rate here if the gain not monotonically decreasing
+    iter++;  
+  }while(iter < total_iter);
+  T.stop(); 
+  cout<<"Time spent "<<T.get()<<" ms "<<endl;
+}
+void do_sgd () {
+  globalThetas.resize(featureSize); 
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<float> dis(-1, 1);
+  threadF perThreadWeights; 
+  for ( int j = 0; j < globalThetas.size(); j++) { 
+    globalThetas[i] = dis(gen);
+  }
+  for ( int i = 0 ; i < perThreadWeights.size(); i++) {
+    AlignedVector &threadWeights(*perThreadWeights.getRemote(i));
+    threadWeights.resize(featureSize);
+    for ( int j = 0; j < globalThetas.size(); j++) { 
+      threadWeights[j] = globalThetas[j];
+    }
+  }
+  for (int iter_num = 0; iter_num < 500; i++) { 
+    Galois::do_all_local(graph,SGD(perThreadWeights));
+    for (int i = 0; i< globalThetas.size(); i++)  {
+      globalThetas[i] = 0.0; 
+    }
+    for (int i = 0 ; i < perThreadWeights.size(); i++) { 
+      AlignedVector &threadWeights(*perThreadWeights.getRemote(i));
+      for ( int j = 0; j < threadWeights.size(); j++) { 
+        globalThetas[j] += (threadWeights[j] / perThreadWeights.size());
+      }
+    }
+  }
+}
+
 int main(int argc,char **argv) { 
 	Galois::StatManager statManager;
 	LonestarStart(argc, argv, name, desc, url);
   int featureSize,numSamples;
   Galois::preAlloc(10000);
 	readGraph(filename,featureSize,numSamples);
-  globalThetas.resize(featureSize);
   cout<<"Graph read "<<featureSize<<" "<<numSamples<<endl;
-	//return 1;
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> dis(-1, 1);
-	//Initialize globalThetas
-	for ( int i = 0; i < featureSize; i++) { 
-		globalThetas[i] = dis(gen);
-	}
-	float alpha = 2; //something 
-  int iter = 0; 
-  int total_iter = 200;
-  Galois::StatTimer T;
-  T.start();
-	do {
-		threadF localGains; 
-		threadG gainValues;
-		for (int i = 0; i < localGains.size(); i++) { 
-			localGains.getRemote(i)->resize(featureSize);
-			float &gain(*gainValues.getRemote(i));
-			gain = 0;
-		}
-		Galois::do_all_local(graph,GD(localGains,gainValues,featureSize));
-		vector <float> globalGain(featureSize);
-		for (int i = 0; i < localGains.size(); i++) { 
-			vector<float,AlignmentAllocator<float,16> > &localGain(*localGains.getRemote(i));
-			for (int j = 0; j < localGain.size(); j++) {
-				globalGain[j] += localGain[i];
-			}
-		}
-		for (int i = 0; i < featureSize; i ++) { 
-			globalThetas[i] -= alpha * globalGain[i];
-      globalGain[i] = 0;
-		}
-		//Using gainValues do:
-		//TODO specify termination condition here 
-		//Change learning rate here if the convergence is too slow 
-		//Change Learning rate here if the gain not monotonically decreasing
-    iter++;  
-	}while(iter < total_iter);
-  T.stop(); 
-  cout<<"Time spent "<<T.get()<<" ms "<<endl;
+  
+  
   return 0;
 }

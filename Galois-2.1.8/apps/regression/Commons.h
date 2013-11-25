@@ -28,4 +28,7 @@ struct Node {
 };
 typedef Galois::Graph::FirstGraph<Node,void,false> Graph;  //we should use LC graphs
 typedef Graph::GraphNode GNode;
+typedef vector<float, AlignmentAllocator<float,16> > AlignedVector;
+typedef GaloisRuntime::PerThreadStorage<vector<float,AlignmentAllocator<float,16> > > threadF; 
+typedef GaloisRuntime::PerThreadStorage<float> threadG;	
 #endif
