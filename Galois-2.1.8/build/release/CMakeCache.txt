@@ -127,7 +127,7 @@ CMAKE_COLOR_MAKEFILE:BOOL=ON
 CMAKE_CXX_COMPILER:FILEPATH=/opt/apps/gcc/4.7.1/bin/c++
 
 //Flags used by the compiler during all build types.
-CMAKE_CXX_FLAGS:STRING=
+CMAKE_CXX_FLAGS:STRING=-march=native
 
 //Flags used by the compiler during debug builds.
 CMAKE_CXX_FLAGS_DEBUG:STRING=-g
@@ -288,6 +288,9 @@ CPACK_SOURCE_ZIP:BOOL=OFF
 
 //C++ compiler flags for C++0x features
 CXX0X_FLAGS:STRING=-std=c++0x
+
+//No help, variable specified on the command line.
+CXX_FLAGS:UNINITIALIZED=--march=native
 
 //Path to a file.
 DOXYFILE_IN:FILEPATH=/work/02188/nikunj/multicore/parallelStuff/Galois-2.1.8/Doxyfile.in

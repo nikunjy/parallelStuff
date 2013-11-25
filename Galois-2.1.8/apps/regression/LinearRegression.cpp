@@ -24,6 +24,9 @@
  * @author Nikunj Yadav < nikunj@cs.utexas.edu >
  */
 #include "Commons.h"
+#include <sstream>
+#include <algorithm>
+#include <iterator>
 using namespace std;
 
 const char* name = "Linear Regression with multivariables";
@@ -34,7 +37,7 @@ static cll::opt<std::string> filename(cll::Positional, cll::desc("<input file>")
 static cll::opt<int> fs(cll::Positional, cll::desc("featureSize"));
 static cll::opt<int> ns(cll::Positional, cll::desc("Samples"));
 
-vector<float> globalThetas;
+vector<float,AlignmentAllocator<float,16> > globalThetas;
 Graph graph;
 void readGraph(string fileName,int &featureSize,int &numSamples) { 
 	fstream fin(fileName.c_str(),ios::in);
@@ -51,9 +54,16 @@ void readGraph(string fileName,int &featureSize,int &numSamples) {
   vector<pair<float,float> > variance(dim+1);
 	for ( int i = 0; i < V; i++) { 
 		Node node;
-		for (int k = 0; k <= dim ; k++) { 
+    string line;
+    getline(fin,line);
+    if (i == 0) { 
+      continue;
+    }
+    istringstream iss(line);
+    vector<string> tokens{istream_iterator<string>{iss},istream_iterator<string>{}};
+    for (int k = 0; k <= dim ; k++) { 
 			float value; 
-			fin>>value;
+      value = atof(tokens[k].c_str());
       means[k] += value;
       if (i == 0) { 
         variance[k].first = value;
@@ -93,26 +103,27 @@ void readGraph(string fileName,int &featureSize,int &numSamples) {
 	};
 	Galois::do_all(equations.begin(), equations.end(),fillGraph(means,variance),"make_graph");
 }
-typedef GaloisRuntime::PerThreadStorage<vector<float> > threadF; 
+#define USE_SSE
+typedef GaloisRuntime::PerThreadStorage<vector<float,AlignmentAllocator<float,16> > > threadF; 
 typedef GaloisRuntime::PerThreadStorage<float> threadG;
-struct Process { 
+struct GD { 
 	threadF &localGains; 
 	threadG &gainValue;
   int featureSize;
-	Process(threadF &lg, threadG &gv,int featureSize):
+	GD(threadF &lg, threadG &gv,int featureSize):
     localGains(lg),gainValue(gv) {
      this->featureSize = featureSize; 
 	}
 	void operator()(GNode node) { 
 		auto &nd = graph.getData(node,Galois::NONE);
-		vector <float> &localGain(*localGains.getLocal());
+		vector <float,AlignmentAllocator<float,16> > &localGain(*localGains.getLocal());
 		float error = 0;
 		float expectedValue = 0.0;
+#ifdef USE_SSE
     int index = 0;
     __m128 a1,x1,r1,a2,x2,r2;
     __m128 sum = _mm_setzero_ps();
     __m128 sum1 = _mm_setzero_ps();
-    __m128 sum2 = _mm_setzero_ps();
     for(size_t j=0;j<featureSize;j+=4,index+=4) {
         float *theta = &(globalThetas[index]);
         float *f = &(nd.featureValues[index]);
@@ -123,17 +134,36 @@ struct Process {
     }
      _mm_hadd_ps(sum1,sum1);
      _mm_hadd_ps(sum1,sum1);
-     _mm_store_ss(&expectedValue,sum);
-		/*for (int i = 0; i < featureSize; i++) {
+     _mm_store_ss(&expectedValue,sum1);
+#else
+		for (int i = 0; i < featureSize; i++) {
 			expectedValue += globalThetas[i] * nd.featureValues[i];
-		}*/
+		}
+#endif
 		error = (expectedValue - nd.outValue);
 		float &gain(*gainValue.getLocal());
 		gain = error;
+#ifdef USE_SSE
+    index = 0; 
+    a1 = _mm_load1_ps(&error);
+    for (size_t j=0;j<featureSize;j+=4,index+=4) {
+        float *f = &(nd.featureValues[index]);
+        x1 = _mm_load_ps(f);
+        r1 = _mm_mul_ps(a1,x1);
+        float *result = &(localGain[index]);
+        sum = _mm_load_ps(result);
+        sum = _mm_add_ps(r1,sum);
+        _mm_store_ps(result,sum);
+    }
+#else
 		for (int i = 0; i < featureSize; i++) {
 			localGain[i]+= error * nd.featureValues[i];
 		}
+#endif
 	}
+};
+struct sgd {
+
 };
 int main(int argc,char **argv) { 
 	Galois::StatManager statManager;
@@ -143,7 +173,8 @@ int main(int argc,char **argv) {
 	readGraph(filename,featureSize,numSamples);
   globalThetas.resize(featureSize);
   cout<<"Graph read "<<featureSize<<" "<<numSamples<<endl;
-	std::random_device rd;
+	//return 1;
+  std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<float> dis(-1, 1);
 	//Initialize globalThetas
@@ -163,16 +194,17 @@ int main(int argc,char **argv) {
 			float &gain(*gainValues.getRemote(i));
 			gain = 0;
 		}
-		Galois::do_all_local(graph,Process(localGains,gainValues,featureSize));
+		Galois::do_all_local(graph,GD(localGains,gainValues,featureSize));
 		vector <float> globalGain(featureSize);
 		for (int i = 0; i < localGains.size(); i++) { 
-			vector<float> &localGain(*localGains.getRemote(i));
+			vector<float,AlignmentAllocator<float,16> > &localGain(*localGains.getRemote(i));
 			for (int j = 0; j < localGain.size(); j++) {
 				globalGain[j] += localGain[i];
 			}
 		}
 		for (int i = 0; i < featureSize; i ++) { 
 			globalThetas[i] -= alpha * globalGain[i];
+      globalGain[i] = 0;
 		}
 		//Using gainValues do:
 		//TODO specify termination condition here 
