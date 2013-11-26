@@ -22,10 +22,22 @@
 #include<pmmintrin.h>
 #include<immintrin.h>
 #include "allocator.h"
-struct Node { 
-  std::vector <float,AlignmentAllocator<float,16> > featureValues;
-	float outValue; 
-};
-typedef Galois::Graph::FirstGraph<Node,void,false> Graph;  //we should use LC graphs
-typedef Graph::GraphNode GNode;
+void normalize(std::vector<float, AlignmentAllocator<float,16> > &v) { 
+	float sum = 0.0; 
+	for (int i = 0; i < v.size(); i++) { 
+		sum += v[i];
+	}
+	for (int i = 0; i < v.size(); i++) { 
+		v[i] /= sum;
+	}
+}
+void normalize(std::vector<float> &v) { 
+	float sum = 0.0; 
+	for (int i = 0; i < v.size(); i++) { 
+		sum += v[i];
+	}
+	for (int i = 0; i < v.size(); i++) { 
+		v[i] /= sum;
+	}
+}
 #endif
