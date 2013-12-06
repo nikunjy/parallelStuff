@@ -48,6 +48,6 @@ int main(int argc,char **argv) {
   int featureSize; 
   SparseRegression::readGraph(filename,featureSize,ns);
   cout<<"Graph Read " << featureSize<<" "<<ns;
-  SparseRegression::do_scd(fs,ns);
+  SparseRegression::do_scd(featureSize,ns);
   return 0;
 }

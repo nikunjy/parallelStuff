@@ -35,7 +35,7 @@ void readGraph(string fileName,int &featureSize,int numSamples) {
     	means[index] += value;
     	maxValues[index] = max(maxValues[index],value);
     	minValues[index] = min(minValues[index],value);
-    	if ( idNodes.find(i) == idNodes.end()) { 
+    	if ( idNodes.find(index) == idNodes.end()) { 
     		Node node; 
     		node.featureId = index;
     		node.fvPair.push_back(make_pair(i,value));
@@ -62,6 +62,7 @@ void readGraph(string fileName,int &featureSize,int numSamples) {
       GNode gNode = graph.createNode(idNode.second);
       graph.addNode(gNode,Galois::NONE);
       auto &nd = graph.getData(gNode,Galois::NONE);
+      nd.featureId = index;
       vector<pair<int,float> > &fv(nd.fvPair);
       for (auto p : fv) { 
       	p.second = (p.second - means[index]) / (maxValues[index] - minValues[index]);
@@ -97,7 +98,7 @@ struct SCD {
       srand(time(NULL));
       vector<float> &localWeights(*perThreadWeights.getLocal());
       for(int count = 0; count < batchSize; count++) {
-      	int r = rand()%nodes.size();
+      	int r = rand() % nodes.size();
       	auto &nd = graph.getData(nodes[r],Galois::NONE);
       	float sum = 0;
       	int featureId = nd.featureId;
@@ -110,8 +111,7 @@ struct SCD {
       	float eta = 0.0;
       	if (localWeights[featureId] - sum > lambda) {
       		eta = -sum / 1 - lambda;
-      	} else {                                                                                                            
-      		if (localWeights[featureId] - sum < -lambda) {
+      	} else {                                                                                                   if (localWeights[featureId] - sum < -lambda) {
       			eta = -sum + lambda;
       		} else {
       			eta = -localWeights[featureId]; 
@@ -129,6 +129,8 @@ struct SCD {
 void do_scd(int featureSize, int numSamples) {
   Galois::StatTimer T;
   T.start();
+  featureSize += 1;
+  cout<<featureSize<<endl;
   vector<float> globalThetas;
   globalThetas.resize(featureSize); 
   std::random_device rd;
